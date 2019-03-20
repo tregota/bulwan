@@ -31,9 +31,9 @@ Since I'm using it in a docker container, all settings are fetched from these en
 * EXPOSED_HTTPSERVER_URL_1
   - the URL to which calls using the EXPOSED_HTTPSERVER_PREFIX_1 route prefix are redirected to. Don't end with a slash.
 * EXPOSED_HTTPSERVER_PREFIX_2
-  - another prefix. You can add howmany redirects you'd like as long as your don't skip over any indexes.
+  - another prefix. You can add how many redirects you'd like as long as your don't skip over any indexes.
 * EXPOSED_HTTPSERVER_URL_2
-  - another URL. You can add howmany redirects you'd like as long as your don't skip over any indexes.
+  - another URL. You can add how many redirects you'd like as long as your don't skip over any indexes.
 
 ## Commands
 The router handles commands in addition to the redirects, these are:
