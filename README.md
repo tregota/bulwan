@@ -1,5 +1,5 @@
 # bulwan
-Connects to a server using SSH and redirects a port on it to local http services on you LAN like a REST API.
+Docker Container that connects to a server using SSH and redirects a port on it to local http services on you LAN like a REST API.
 
 My first Go project so use it at your own peril.. :)
 
