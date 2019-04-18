@@ -8,10 +8,11 @@ ENV SSH_USERNAME=$default_url
 ENV SSH_LISTEN_PORT=$default_url
 ENV SSH_PRIVATE_KEY=$default_url
 ENV HTTP_GET_ON_CLOSE=$default_url
-ENV EXPOSED_HTTPSERVER_PREFIX_1="routerprefix"
-ENV EXPOSED_HTTPSERVER_URL_1="http://host:port"
-ENV EXPOSED_HTTPSERVER_PREFIX_2=$default_url
-ENV EXPOSED_HTTPSERVER_URL_2=$default_url
+ENV EXPOSED_HTTP_SERVERS_PREFIX_1="routerprefix"
+ENV EXPOSED_HTTP_SERVERS_URL_1="http://host:port"
+ENV EXPOSED_HTTP_SERVERS_PREFIX_2=$default_url
+ENV EXPOSED_HTTP_SERVERS_URL_2=$default_url
 EXPOSE 35300/tcp
 ADD main /
+ADD settings.conf /
 CMD ["/main"]

@@ -20,6 +20,24 @@ func getAuthMethod(privatekey string) (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(key), nil
 }
 
+// CleanPrivateKey tries to fix keys that has been supplied through an environmental variable or otherwise messed up
+func CleanPrivateKey(key string) string {
+	re := regexp.MustCompile(`(?:-----(?:BEGIN|END) RSA PRIVATE KEY-----|\S+)`)
+	lines := re.FindAllString(key, -1)
+	cleanlines := []string{"-----BEGIN RSA PRIVATE KEY-----"}
+	for _, line := range lines {
+		if len(line) > 0 && line != "-----BEGIN RSA PRIVATE KEY-----" {
+			if line == "-----END RSA PRIVATE KEY-----" {
+				break
+			} else {
+				cleanlines = append(cleanlines, line)
+			}
+		}
+	}
+	cleanlines = append(cleanlines, "-----END RSA PRIVATE KEY-----")
+	return strings.Join(cleanlines, "\n")
+}
+
 // Endpoint contains all that is needed to connect to an endpoint
 type Endpoint struct {
 	Host          string
@@ -108,6 +126,58 @@ func forward(sourceConn net.Conn, destinationEndpoint *Endpoint) {
 	copyConn(destinationConn, sourceConn)
 }
 
+// TestConnectionLoop sends a test packet at a set interval
+func (conn *SSHConn) TestConnectionLoop(testInterval time.Duration, timeout time.Duration) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("Error: TestConnectionLoop - Recovered:", r)
+				conn.Connection.Close()
+			}
+		}()
+		t := time.NewTicker(testInterval)
+		defer t.Stop()
+		for {
+			<-t.C
+
+			done := make(chan bool, 1)
+			errors := make(chan error, 1)
+			go func() {
+				_, _, err := conn.Connection.SendRequest("test", true, nil)
+				if err != nil {
+					errors <- err
+				}
+				done <- true
+			}()
+
+			select {
+			case <-done:
+				continue
+			case err := <-errors:
+				fmt.Printf("Error: %s TestConnectionLoop - %v\n", sshConn.Server.Host, err.Error())
+				conn.Connection.Close()
+				return
+			case <-time.After(timeout):
+				fmt.Printf("Error: %s TestConnectionLoop - timeout\n", sshConn.Server.Host)
+				conn.Connection.Close()
+				return
+			}
+		}
+	}()
+}
+
+func (conn *SSHConn) forward(sourceConn net.Conn, destinationEndpoint *Endpoint) {
+
+	destinationConn, err := conn.Connection.Dial("tcp", destinationEndpoint.String())
+	if err != nil {
+		fmt.Printf("Error: %s:%d forward dial - %v", destinationEndpoint.Host, destinationEndpoint.Port, err)
+		return
+	}
+
+	go copyConn(sourceConn, destinationConn)
+	copyConn(destinationConn, sourceConn)
+}
+
 // ReverseTunnelListen binds a port on the remote server and returns a listener
 func (conn *SSHConn) ReverseTunnelListen(sourceport int) (net.Listener, error) {
 	sourceEndpoint := &Endpoint{
@@ -141,43 +211,36 @@ func (conn *SSHConn) ReverseTunnelForceListen(sourceport int, username string) (
 	}
 }
 
-// ReverseTunnel binds a port on the remote server and redirects traffic from it to a given host and port
-func (conn *SSHConn) ReverseTunnel(sourceport int, destinationhost string, destinationport int) error {
+// ForwardConnectionsTo accepts connections on the given listener and redirects traffic from it to a given host and port on the other end of the ssh connection
+func (conn *SSHConn) ForwardConnectionsTo(listener net.Listener, destinationhost string, destinationport int) error {
 
 	destinationEndpoint := &Endpoint{
 		Host: destinationhost,
 		Port: destinationport,
 	}
 
-	listener, err := conn.ReverseTunnelListen(sourceport)
-	if err != nil {
-		return fmt.Errorf("%s:%d listen - %v", conn.Server.Host, sourceport, err)
+	for {
+		sourceConn, err := listener.Accept()
+		if err != nil {
+			return fmt.Errorf("%s accept - %v", listener.Addr().String(), err)
+		}
+		go conn.forward(sourceConn, destinationEndpoint)
 	}
-	defer listener.Close()
+}
+
+// ForwardConnectionsTo accepts connections on the given listener and redirects traffic from it to a given host and port
+func ForwardConnectionsTo(listener net.Listener, destinationhost string, destinationport int) error {
+
+	destinationEndpoint := &Endpoint{
+		Host: destinationhost,
+		Port: destinationport,
+	}
 
 	for {
 		sourceConn, err := listener.Accept()
 		if err != nil {
-			return fmt.Errorf("%s:%d accept - %v", conn.Server.Host, sourceport, err)
+			return fmt.Errorf("%s accept - %v", listener.Addr().String(), err)
 		}
 		go forward(sourceConn, destinationEndpoint)
 	}
-}
-
-// CleanPrivateKey tries to fix keys that has been supplied through an environmental variable or otherwise messed up
-func CleanPrivateKey(key string) string {
-	re := regexp.MustCompile(`(?:-----(?:BEGIN|END) RSA PRIVATE KEY-----|\S+)`)
-	lines := re.FindAllString(key, -1)
-	cleanlines := []string{"-----BEGIN RSA PRIVATE KEY-----"}
-	for _, line := range lines {
-		if len(line) > 0 && line != "-----BEGIN RSA PRIVATE KEY-----" {
-			if line == "-----END RSA PRIVATE KEY-----" {
-				break
-			} else {
-				cleanlines = append(cleanlines, line)
-			}
-		}
-	}
-	cleanlines = append(cleanlines, "-----END RSA PRIVATE KEY-----")
-	return strings.Join(cleanlines, "\n")
 }

@@ -1,14 +1,15 @@
 # bulwan
-Docker container that connects to a server using SSH and redirects a port on it to local http services on your LAN.
-
+Application that connects to a server using SSH and redirects a port on it to local http services on your LAN.
 My first Go project so use it at your own peril.. :)
+
+Can be built into a docker container.
 
 I have a personal webpage on a VPS where I want to use databases and other resources that I have on my LAN, but I don't want to open ports in my router and expose them to the Internet. This allows me to feel a bit safer while not having to pay for cloud storage. ;)
 
-bulwan is a play on the Swedish word bulvan which is a legal term for a person that acts in your stead so that you may remain anonymous.
+bulwan is a slight play on the Swedish word bulvan which is a legal term for a person that acts in your stead so that you may remain anonymous.
 
 ## Environmental Variables
-Since I'm using it in a docker container, all settings are fetched from these environmental variables:
+Since it can be run in a docker container all settings can be fetched from these environmental variables that override whatever is in settings.conf
 
 * SERVER_HOST
   - The host to connect to.
@@ -26,14 +27,17 @@ Since I'm using it in a docker container, all settings are fetched from these en
   - This is the content of your PEM formatted private key file. the part declared using -----BEGIN RSA PRIVATE KEY----- and -----END RSA PRIVATE KEY-----.
 * HTTP_GET_ON_CLOSE
   - An URL that gets called if the close tunnel command is called. Couldn't get it to work with https unless I use InsecureSkipVerify, so not perfect.. I use it to send notifications to my phone.
-* EXPOSED_HTTPSERVER_PREFIX_1
-  - The first URL prefix. e.g. proxy to redirect calls to /proxy/{etc} to the URL given in EXPOSED_HTTPSERVER_URL_1 with {etc} appended.
-* EXPOSED_HTTPSERVER_URL_1
-  - the URL to which calls using the EXPOSED_HTTPSERVER_PREFIX_1 route prefix are redirected to. Don't end with a slash.
-* EXPOSED_HTTPSERVER_PREFIX_2
-  - another prefix. You can add how many redirects you'd like as long as your don't skip over any indexes.
-* EXPOSED_HTTPSERVER_URL_2
-  - another URL. You can add how many redirects you'd like as long as your don't skip over any indexes.
+* EXPOSED_HTTP_SERVERS_PREFIX_1
+  - The first URL prefix. e.g. proxy to redirect calls to /proxy/{etc} to the URL given in EXPOSED_HTTP_SERVERS_URL_1 with {etc} appended.
+* EXPOSED_HTTP_SERVERS_URL_1
+  - The URL to which calls using the EXPOSED_HTTP_SERVERS_PREFIX_1 route prefix are redirected to. Don't end with a slash.
+* EXPOSED_HTTP_SERVERS_PREFIX_2
+  - Another prefix. You can add how many redirects you'd like as long as your don't skip over any indexes.
+* EXPOSED_HTTP_SERVERS_URL_2
+  - Another URL. You can add how many redirects you'd like as long as your don't skip over any indexes.
+
+## Other configuration options
+You can add files named for a setting name from the settings.conf to for instance have the private key in a file called SSHPrivateKey.
 
 ## Commands
 The router handles commands in addition to the redirects, these are:
@@ -43,4 +47,4 @@ The router handles commands in addition to the redirects, these are:
 * /open
   - allows it to connect, must be called after deployment since the default is not allowing a connection.
 
-bulwan binds both the configured port on the remote server and :35300 locally.
+bulwan binds both the configured port on the remote server and :35300 (default) locally.

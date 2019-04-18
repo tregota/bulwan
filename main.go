@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,20 +13,36 @@ import (
 )
 
 // global vars
-var serverEndpoint *Endpoint
-var username string
-var port int
-var privatekey string
+var settings = &settingstype{}
 var tunnelActive bool
 var sshConn *SSHConn
 var router *mux.Router
-var onclose string
+
+// structs
+type exposedHTTPServer struct {
+	Prefix string
+	URL    string
+}
+type settingstype struct {
+	ServerHost          string
+	ServerPort          int
+	ServerPublicKey     string // take the relevant key from the known_hosts file
+	ServerPublicKeyType string
+	SSHUsername         string
+	SSHListenPort       int
+	SSHPrivateKey       string
+	LocalServerAddr     string
+	HTTPGetOnClose      string
+	ExposedHTTPServers  []exposedHTTPServer
+}
 
 // functions
 func proxy(url string) http.HandlerFunc {
 
 	return func(wr http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+
+		// fmt.Printf("Debug: request - %s\n", url+r.URL.String())
 
 		req, err := http.NewRequest(r.Method, url+r.URL.String(), r.Body)
 		if err != nil {
@@ -59,26 +74,36 @@ func proxy(url string) http.HandlerFunc {
 func remotePort() (err error) {
 
 	if !tunnelActive {
-		fmt.Printf("Tunnel inactive, waiting..\n")
+		fmt.Printf("Info: Tunnel inactive, waiting..\n")
 		for !tunnelActive {
 			time.Sleep(time.Second)
 		}
 	}
 
-	sshConn, err = serverEndpoint.SSHDial(username, privatekey)
+	serverEndpoint := Endpoint{
+		Host:          settings.ServerHost,
+		Port:          settings.ServerPort,
+		PublicKey:     settings.ServerPublicKey,
+		PublicKeyType: settings.ServerPublicKeyType,
+	}
+
+	sshConn, err = serverEndpoint.SSHDial(settings.SSHUsername, settings.SSHPrivateKey)
 	if err != nil {
 		return fmt.Errorf("%s:%d remotePort sshdial - %v", serverEndpoint.Host, serverEndpoint.Port, err)
 	}
 	defer sshConn.Connection.Close()
 
-	// blocking call
-	listener, err := sshConn.ReverseTunnelForceListen(port, username)
+	// send a package to server every minute to keep session alive and notice broken connections
+	sshConn.TestConnectionLoop(2*time.Minute, 10*time.Second)
+
+	fmt.Printf("Info: ReverseTunnelForceListen on remote port %d\n", settings.SSHListenPort)
+	listener, err := sshConn.ReverseTunnelForceListen(settings.SSHListenPort, settings.SSHUsername)
 	if err != nil {
 		if strings.Contains(err.Error(), "unable to bind port") {
-			//well crap..
+			fmt.Printf("Fatal Error: ReverseTunnelForceListen - %s\n", err.Error())
 			os.Exit(1) // for now
 		}
-		return fmt.Errorf("%s:%d remotePort listen - %v", sshConn.Server.Host, port, err)
+		return fmt.Errorf("%s:%d remotePort listen - %v", sshConn.Server.Host, settings.SSHListenPort, err)
 	}
 	defer listener.Close()
 
@@ -88,6 +113,7 @@ func remotePort() (err error) {
 		Handler:      router,
 	}
 	defer srv.Close()
+	fmt.Printf("Info: Starting server on remote port %d listener\n", settings.SSHListenPort)
 	return srv.Serve(listener)
 }
 
@@ -97,15 +123,16 @@ func localPort() error {
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		Handler:      router,
-		Addr:         ":35300",
+		Addr:         settings.LocalServerAddr,
 	}
 	defer srv.Close()
+	fmt.Printf("Info: ListenAndServe on local port %s\n", settings.LocalServerAddr)
 	return srv.ListenAndServe()
 }
 
 func openTunnel(w http.ResponseWriter, r *http.Request) {
 	if !tunnelActive {
-		fmt.Printf("Opening tunnel..\n")
+		fmt.Printf("Info: Opening tunnel..\n")
 		flagFile, err := os.Create("tunnelactive.flag")
 		if err != nil {
 			fmt.Printf("openTunnel error: %s\n", err)
@@ -121,7 +148,7 @@ func openTunnel(w http.ResponseWriter, r *http.Request) {
 
 func closeTunnel(w http.ResponseWriter, r *http.Request) {
 	if tunnelActive {
-		fmt.Printf("Closing tunnel..\n")
+		fmt.Printf("Info: Closing tunnel..\n")
 		err := os.Remove("tunnelactive.flag")
 		if err != nil {
 			fmt.Printf("closeTunnel error: %s\n", err)
@@ -136,11 +163,11 @@ func closeTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func onCloseTunnel() {
-	if len(onclose) > 0 {
+	if len(settings.HTTPGetOnClose) > 0 {
 
 		// sadly we don't seem to have any root certificates available (certificate signed by unknown authority)
 		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-		req, _ := http.NewRequest(http.MethodGet, onclose, nil)
+		req, _ := http.NewRequest(http.MethodGet, settings.HTTPGetOnClose, nil)
 
 		_, err := client.Do(req)
 		if err != nil {
@@ -150,8 +177,8 @@ func onCloseTunnel() {
 }
 
 func main() {
-	fmt.Printf("Starting..\n")
-	defer fmt.Printf("Exiting..\n")
+	fmt.Printf("Info: Starting..\n")
+	defer fmt.Printf("Info: Exiting..\n")
 
 	if _, err := os.Stat("tunnelactive.flag"); os.IsNotExist(err) {
 		tunnelActive = false
@@ -159,54 +186,25 @@ func main() {
 		tunnelActive = true
 	}
 
-	serverport, err := strconv.Atoi(os.Getenv("SERVER_PORT"))
+	err := LoadSettings(settings)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Printf("Error: GetSettings - %s\n", err.Error())
 		os.Exit(1)
 	}
-	serverEndpoint = &Endpoint{
-		Host:          os.Getenv("SERVER_HOST"),
-		Port:          serverport,
-		PublicKey:     os.Getenv("SERVER_PUBLIC_KEY"), // take the relevant key from the known_hosts file
-		PublicKeyType: os.Getenv("SERVER_PUBLIC_KEY_TYPE"),
-	}
-	username = os.Getenv("SSH_USERNAME")
-	if len(username) == 0 {
-		fmt.Fprintf(os.Stderr, "error: env SSH_USERNAME empty\n")
-		os.Exit(1)
-	}
-	port, err = strconv.Atoi(os.Getenv("SSH_LISTEN_PORT"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-	privatekey = os.Getenv("SSH_PRIVATE_KEY")
-	if len(privatekey) == 0 {
-		fmt.Fprintf(os.Stderr, "error: env SSH_PRIVATE_KEY empty\n")
-		os.Exit(1)
-	}
-	onclose = os.Getenv("HTTP_GET_ON_CLOSE")
 
 	router = mux.NewRouter()
 	router.HandleFunc("/open", openTunnel).Methods("GET")
 	router.HandleFunc("/close", closeTunnel).Methods("GET")
 
-	num := 1
-	for true {
-		prefix := os.Getenv(fmt.Sprintf("EXPOSED_HTTPSERVER_PREFIX_%d", num))
-		url := os.Getenv(fmt.Sprintf("EXPOSED_HTTPSERVER_URL_%d", num))
-
-		if len(url) > 0 {
-			router.PathPrefix(fmt.Sprintf("/%s/", prefix)).Handler(http.StripPrefix(fmt.Sprintf("/%s", prefix), proxy(url)))
-		} else {
-			break
-		}
-		num++
+	for _, exposedHTTPServer := range settings.ExposedHTTPServers {
+		fmt.Printf("Info: proxy - /%s/ to %s\n", exposedHTTPServer.Prefix, exposedHTTPServer.URL)
+		router.PathPrefix(fmt.Sprintf("/%s/", exposedHTTPServer.Prefix)).
+			Handler(http.StripPrefix(fmt.Sprintf("/%s", exposedHTTPServer.Prefix), proxy(exposedHTTPServer.URL)))
 	}
 
 	go KeepAlive(localPort)
 	err = KeepAlive(remotePort)
 	if err != nil {
-		fmt.Printf("remotePort Error: %s\n", err)
+		fmt.Printf("Error: remotePort - %s\n", err)
 	}
 }
