@@ -93,8 +93,9 @@ func remotePort() (err error) {
 	}
 	defer sshConn.Connection.Close()
 
-	// send a package to server every minute to keep session alive and notice broken connections
-	sshConn.TestConnectionLoop(2*time.Minute, 10*time.Second)
+	// send a package to server every 2 minutes to keep session alive and notice broken connections
+	testloop := sshConn.TestConnectionLoop(2*time.Minute, 10*time.Second)
+	defer testloop.Stop()
 
 	fmt.Printf("Info: ReverseTunnelForceListen on remote port %d\n", settings.SSHListenPort)
 	listener, err := sshConn.ReverseTunnelForceListen(settings.SSHListenPort, settings.SSHUsername)

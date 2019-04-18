@@ -126,8 +126,21 @@ func forward(sourceConn net.Conn, destinationEndpoint *Endpoint) {
 	copyConn(destinationConn, sourceConn)
 }
 
+// ConnectionTestLoop has the test loop data
+type ConnectionTestLoop struct {
+	StopChan chan bool
+}
+
+// Stop lets you stop the test loop
+func (loop *ConnectionTestLoop) Stop() {
+	loop.StopChan <- true
+}
+
 // TestConnectionLoop sends a test packet at a set interval
-func (conn *SSHConn) TestConnectionLoop(testInterval time.Duration, timeout time.Duration) {
+func (conn *SSHConn) TestConnectionLoop(testInterval time.Duration, timeout time.Duration) ConnectionTestLoop {
+	testloop := ConnectionTestLoop{
+		StopChan: make(chan bool, 1),
+	}
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -138,7 +151,11 @@ func (conn *SSHConn) TestConnectionLoop(testInterval time.Duration, timeout time
 		t := time.NewTicker(testInterval)
 		defer t.Stop()
 		for {
-			<-t.C
+			select {
+			case <-t.C:
+			case <-testloop.StopChan:
+				return
+			}
 
 			done := make(chan bool, 1)
 			errors := make(chan error, 1)
@@ -146,6 +163,7 @@ func (conn *SSHConn) TestConnectionLoop(testInterval time.Duration, timeout time
 				_, _, err := conn.Connection.SendRequest("test", true, nil)
 				if err != nil {
 					errors <- err
+					return
 				}
 				done <- true
 			}()
@@ -164,6 +182,7 @@ func (conn *SSHConn) TestConnectionLoop(testInterval time.Duration, timeout time
 			}
 		}
 	}()
+	return testloop
 }
 
 func (conn *SSHConn) forward(sourceConn net.Conn, destinationEndpoint *Endpoint) {
