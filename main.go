@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +16,7 @@ var settings = &settingstype{}
 var tunnelActive bool
 var sshConn *SSHConn
 var router *mux.Router
+var noClose bool
 
 // structs
 type exposedHTTPServer struct {
@@ -32,6 +32,7 @@ type settingstype struct {
 	SSHListenPort       int
 	SSHPrivateKey       string
 	LocalServerAddr     string
+	DialCloseDelay      int // the delay in seconds from a dial after which a close call is allowed, default disabled
 	HTTPGetOnClose      string
 	ExposedHTTPServers  []exposedHTTPServer
 }
@@ -87,6 +88,15 @@ func remotePort() (err error) {
 		PublicKeyType: settings.ServerPublicKeyType,
 	}
 
+	if settings.DialCloseDelay > 0 {
+		// accept no delayed close calls for a while that can be as of a result of our own dial if a login script is active on the server
+		noClose = true
+		go func() {
+			<-time.After(time.Duration(settings.DialCloseDelay) * time.Second)
+			noClose = false
+		}()
+	}
+
 	sshConn, err = serverEndpoint.SSHDial(settings.SSHUsername, settings.SSHPrivateKey)
 	if err != nil {
 		return fmt.Errorf("%s:%d remotePort sshdial - %v", serverEndpoint.Host, serverEndpoint.Port, err)
@@ -136,7 +146,7 @@ func openTunnel(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("Info: Opening tunnel..\n")
 		flagFile, err := os.Create("tunnelactive.flag")
 		if err != nil {
-			fmt.Printf("openTunnel error: %s\n", err)
+			fmt.Printf("Error: openTunnel - %s\n", err)
 		} else {
 			flagFile.Close()
 		}
@@ -149,10 +159,16 @@ func openTunnel(w http.ResponseWriter, r *http.Request) {
 
 func closeTunnel(w http.ResponseWriter, r *http.Request) {
 	if tunnelActive {
+		if noClose {
+			fmt.Println("Warning: closeTunnel - Closing not allowed right now.")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		fmt.Printf("Info: Closing tunnel..\n")
 		err := os.Remove("tunnelactive.flag")
 		if err != nil {
-			fmt.Printf("closeTunnel error: %s\n", err)
+			fmt.Printf("Error: closeTunnel - %s\n", err)
 		}
 		go onCloseTunnel()
 		tunnelActive = false
@@ -165,12 +181,9 @@ func closeTunnel(w http.ResponseWriter, r *http.Request) {
 
 func onCloseTunnel() {
 	if len(settings.HTTPGetOnClose) > 0 {
-
-		// sadly we don't seem to have any root certificates available (certificate signed by unknown authority)
-		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
-		req, _ := http.NewRequest(http.MethodGet, settings.HTTPGetOnClose, nil)
-
-		_, err := client.Do(req)
+		// sadly in the docker container we don't have any root certificates available (certificate signed by unknown authority)
+		// so no https calls there, call a local proxy service instead
+		_, err := http.Get(settings.HTTPGetOnClose)
 		if err != nil {
 			fmt.Printf("onCloseTunnel error: %s\n", err)
 		}

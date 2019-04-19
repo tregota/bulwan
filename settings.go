@@ -76,9 +76,8 @@ func LoadSettings(settings interface{}) error {
 				result, err := ioutil.ReadFile(settingName)
 				if err != nil {
 					return err
-				} else {
-					settingValue = string(result) // convert content to string
 				}
+				settingValue = string(result) // convert content to string
 			}
 		}
 

@@ -25,8 +25,10 @@ Since it can be run in a docker container all settings can be fetched from these
   - The port to bind on the server for the reverse tunnel.
 * SSH_PRIVATE_KEY
   - This is the content of your PEM formatted private key file. the part declared using -----BEGIN RSA PRIVATE KEY----- and -----END RSA PRIVATE KEY-----.
+* DIAL_CLOSE_DELAY
+  - If you use a PAM ssh login script on the server to kill the tunnel then it is a good idea to set this delay in seconds after a dial that it will not allow closing of the tunnel. So it doesn't close itself (usually not a problem since the tunnel is closed while dialing but I have seen it happen.)
 * HTTP_GET_ON_CLOSE
-  - An URL that gets called if the close tunnel command is called. Couldn't get it to work with https unless I use InsecureSkipVerify, so not perfect.. I use it to send notifications to my phone.
+  - An URL that gets called if the close tunnel command is called. I use it to send notifications to my phone. The docker container doesn't have any root certificates available so there it's better to call local services that in turn can then make more secure calls to the Internet if that is what you need.
 * EXPOSED_HTTP_SERVERS_PREFIX_1
   - The first URL prefix. e.g. proxy to redirect calls to /proxy/{etc} to the URL given in EXPOSED_HTTP_SERVERS_URL_1 with {etc} appended.
 * EXPOSED_HTTP_SERVERS_URL_1
