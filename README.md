@@ -8,6 +8,8 @@ I have a personal webpage on a VPS where I want to use databases and other resou
 
 bulwan is a slight play on the Swedish word bulvan which is a legal term for a person that acts in your stead so that you may remain anonymous.
 
+![Photo 2019-03-24, 15 41 45](https://user-images.githubusercontent.com/948240/125592402-63053ad9-00fe-466b-a3d6-12fdd15ba960.png)
+
 ## Environmental Variables
 Since it can be run in a docker container all settings can be fetched from these environmental variables that override whatever is in settings.conf
 
